@@ -2,7 +2,7 @@ import socket
 
 if __name__ == '__main__':
     # Example usage
-    HOST = '192.168.1.159'  # localhost
+    HOST = 'localhost'
     PORT = 8000
     MESSAGE = 'Hello, Server!'
 

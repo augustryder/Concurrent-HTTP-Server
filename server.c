@@ -1,5 +1,6 @@
 #include <memory.h>
 #include <netdb.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -8,6 +9,13 @@
 
 #define PORT "8000"
 #define BACKLOG 20
+
+struct client_data
+{
+  int fd;
+};
+
+void* handle_client(void* arg);
 
 int main(int argc, char** argv)
 {
@@ -24,16 +32,19 @@ int main(int argc, char** argv)
   //   struct addrinfo *ai_next; /* pointer to next in list */
   // };
 
+  // Collect address info for creating a IPv4/IPv6 TCP socket
+  // for listening on PORT on all interfaces (0.0.0.0:PORT)
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_flags = AI_PASSIVE;     // use own IP
-  hints.ai_family = AF_INET;       // IPv6
+  hints.ai_flags = AI_PASSIVE;     // all interfaces (loopback, WiFi, etc.)
+  hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP socket
 
+  // NULL hostname for local machine
   struct addrinfo* addrs;
   if (getaddrinfo(NULL, PORT, &hints, &addrs) != 0)
   {
-    fprintf(stderr, "Could not find a valid address\n");
+    fprintf(stderr, "No valid address found.\n");
     exit(1);
   }
 
@@ -44,10 +55,9 @@ int main(int argc, char** argv)
     if ((socketfd = socket(a->ai_family, a->ai_socktype, a->ai_protocol)) == -1)
       continue;
 
-    printf("Socket created!\n");
     if (bind(socketfd, a->ai_addr, a->ai_addrlen) != 0)
     {
-      fprintf(stderr, "bind fail, continuing\n");
+      fprintf(stderr, "Bind failed, trying again...\n");
       close(socketfd);
       continue;
     }
@@ -57,8 +67,7 @@ int main(int argc, char** argv)
 
   if (a == NULL)
   {
-    // bind failed
-    fprintf(stderr, "Failed to bind\n");
+    fprintf(stderr, "Failed to bind.\n");
     exit(1);
   }
 
@@ -70,36 +79,59 @@ int main(int argc, char** argv)
     exit(1);
   }
 
-  printf("Server listening on port %s...\n", PORT);
+  printf("Server listening on %s...\n", PORT);
 
   while (1)
   {
-    int newfd;
+    int clientfd;
     struct sockaddr client_addr;
     socklen_t size;
-    if ((newfd = accept(socketfd, &client_addr, &size)) == -1)
+    if ((clientfd = accept(socketfd, &client_addr, &size)) == -1)
     {
       fprintf(stderr, "Failure to accept client.\n");
       continue;
     }
 
-    char buf[100];
-    int flags = 0;
-    int bytes_read = recv(newfd, &buf, 100, flags);
-    if (bytes_read == 0)
+    struct client_data* data = malloc(sizeof(struct client_data));
+    data->fd = clientfd;
+
+    pthread_t thread;
+    if ((pthread_create(&thread, NULL, handle_client, (void*)data)) != 0)
     {
-      // client closed connection
-      close(newfd);
+      fprintf(stderr, "Failure to spawn thread.\n");
+      close(clientfd);
       continue;
     }
-    buf[bytes_read] = '\0';
-
-    int bytes_sent = send(newfd, &buf, bytes_read, flags);
-    if (bytes_sent != bytes_read)
-      fprintf(stderr, "Could not send all data!\n");
-    if (bytes_sent == 0)
-      fprintf(stderr, "Failure to send.\n");
-    close(newfd);
+    pthread_detach(thread);
   }
   close(socketfd);
+}
+
+void* handle_client(void* arg)
+{
+  struct client_data* data = (struct client_data*)arg;
+  int fd = data->fd;
+  char buf[100];
+  int flags = 0;
+  int bytes_read = recv(fd, &buf, 100, flags);
+  if (bytes_read == 0)
+  {
+    // Client closed connection
+    close(fd);
+    return NULL;
+  }
+  buf[bytes_read] = '\0';
+
+  printf("Data received\n");
+
+  int bytes_sent = send(fd, &buf, bytes_read, flags);
+  if (bytes_sent != bytes_read)
+    fprintf(stderr, "Could not send all data!\n");
+  if (bytes_sent == 0)
+    fprintf(stderr, "Failure to send.\n");
+
+  printf("Data sent\n");
+
+  close(fd);
+  return NULL;
 }
