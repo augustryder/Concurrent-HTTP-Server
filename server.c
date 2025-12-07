@@ -9,6 +9,7 @@
 
 #define PORT "8000"
 #define BACKLOG 20
+#define BUF_SIZE 4096
 
 struct client_data
 {
@@ -100,6 +101,7 @@ int main(int argc, char** argv)
     {
       fprintf(stderr, "Failure to spawn thread.\n");
       close(clientfd);
+      free(data);
       continue;
     }
     pthread_detach(thread);
@@ -111,9 +113,9 @@ void* handle_client(void* arg)
 {
   struct client_data* data = (struct client_data*)arg;
   int fd = data->fd;
-  char buf[100];
+  char buf[BUF_SIZE];
   int flags = 0;
-  int bytes_read = recv(fd, &buf, 100, flags);
+  int bytes_read = recv(fd, &buf, BUF_SIZE, flags);
   if (bytes_read == 0)
   {
     // Client closed connection
@@ -122,7 +124,7 @@ void* handle_client(void* arg)
   }
   buf[bytes_read] = '\0';
 
-  printf("Data received\n");
+  printf("Data received: %s\n", buf);
 
   int bytes_sent = send(fd, &buf, bytes_read, flags);
   if (bytes_sent != bytes_read)
@@ -133,5 +135,6 @@ void* handle_client(void* arg)
   printf("Data sent\n");
 
   close(fd);
+  free(data);
   return NULL;
 }
