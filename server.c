@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <memory.h>
 #include <netdb.h>
 #include <pthread.h>
@@ -10,6 +11,7 @@
 #define PORT "8000"
 #define BACKLOG 20
 #define BUF_SIZE 4096
+#define MAX_PATH_LEN 256
 
 struct client_data
 {
@@ -17,6 +19,7 @@ struct client_data
 };
 
 void* handle_client(void* arg);
+int parse_header(const char* header, char* route);
 
 int main(int argc, char** argv)
 {
@@ -37,7 +40,8 @@ int main(int argc, char** argv)
   // for listening on PORT on all interfaces (0.0.0.0:PORT)
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_flags = AI_PASSIVE;     // all interfaces (loopback, WiFi, etc.)
+  hints.ai_flags =
+      0; // AI_PASSIVE;     // all interfaces (loopback, WiFi, etc.)
   hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP socket
 
@@ -123,18 +127,63 @@ void* handle_client(void* arg)
     return NULL;
   }
   buf[bytes_read] = '\0';
+  char route[MAX_PATH_LEN];
+  if ((parse_header(buf, route)) != 0)
+  {
+    fprintf(stderr, "Error in parsing header.\n");
+    return NULL;
+  }
 
-  printf("Data received: %s\n", buf);
+  printf("route: %s\n", route);
 
-  int bytes_sent = send(fd, &buf, bytes_read, flags);
+  int bytes_sent;
+  if (strcmp(route, "/") == 0)
+  {
+    // send html data
+    int fd;
+    if ((fd = open("www/index.html", O_RDONLY)) == -1)
+    {
+      fprintf(stderr, "Could not read html file.\n");
+      return NULL;
+    }
+    char html_data[BUF_SIZE];
+    int b_read = read(fd, html_data, BUF_SIZE);
+    bytes_sent = send(fd, &html_data, bytes_read, flags);
+    close(fd);
+  }
+  else if (strcmp(route, "/image") == 0)
+  {
+    // send img data
+  }
+  else
+  {
+    // 404 message
+  }
+
   if (bytes_sent != bytes_read)
     fprintf(stderr, "Could not send all data!\n");
   if (bytes_sent == 0)
     fprintf(stderr, "Failure to send.\n");
 
-  printf("Data sent\n");
+  printf("Data sent.\n");
 
   close(fd);
   free(data);
   return NULL;
+}
+
+int parse_header(const char* header, char* route)
+{
+  printf("Header:\n %s", header);
+  int s, e;
+  for (s = 0; header[s] != ' '; s++)
+    ;
+  if (header[++s] != '/')
+    return -1;
+  for (e = s; header[e] != ' '; e++)
+    ;
+  int len = e - s;
+  memcpy(route, &header[s], len);
+  route[len] = '\0';
+  return 0;
 }
