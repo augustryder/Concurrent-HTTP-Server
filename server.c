@@ -10,7 +10,7 @@
 
 #define PORT "8000"
 #define BACKLOG 20
-#define BUF_SIZE 4096
+#define BUFFER_SIZE 4096
 #define MAX_PATH_LEN 256
 
 struct client_data
@@ -20,28 +20,15 @@ struct client_data
 
 void* handle_client(void* arg);
 int parse_header(const char* header, char* route);
+int send_response(int fd, char* response_header, FILE* body);
 
 int main(int argc, char** argv)
 {
-
-  // struct addrinfo
-  // {
-  //   int ai_flags;             /* input flags */
-  //   int ai_family;            /* protocol family for socket */
-  //   int ai_socktype;          /* socket type */
-  //   int ai_protocol;          /* protocol for socket */
-  //   socklen_t ai_addrlen;     /* length of socket-address */
-  //   struct sockaddr *ai_addr; /* socket-address for socket */
-  //   char *ai_canonname;       /* canonical name for service location */
-  //   struct addrinfo *ai_next; /* pointer to next in list */
-  // };
-
   // Collect address info for creating a IPv4/IPv6 TCP socket
   // for listening on PORT on all interfaces (0.0.0.0:PORT)
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_flags =
-      0; // AI_PASSIVE;     // all interfaces (loopback, WiFi, etc.)
+  hints.ai_flags = AI_PASSIVE;     // all interfaces (loopback, WiFi, etc.)
   hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP socket
 
@@ -57,9 +44,11 @@ int main(int argc, char** argv)
   int socketfd;
   for (a = addrs; a != NULL; a = a->ai_next)
   {
+    // Try to initialize socket
     if ((socketfd = socket(a->ai_family, a->ai_socktype, a->ai_protocol)) == -1)
       continue;
 
+    // Try to bind socket to address
     if (bind(socketfd, a->ai_addr, a->ai_addrlen) != 0)
     {
       fprintf(stderr, "Bind failed, trying again...\n");
@@ -78,6 +67,7 @@ int main(int argc, char** argv)
 
   freeaddrinfo(addrs);
 
+  // Set socket as listening
   if (listen(socketfd, BACKLOG) != 0)
   {
     fprintf(stderr, "Failed to listen\n");
@@ -86,6 +76,7 @@ int main(int argc, char** argv)
 
   printf("Server listening on %s...\n", PORT);
 
+  // Handle requests indefinitely
   while (1)
   {
     int clientfd;
@@ -98,12 +89,19 @@ int main(int argc, char** argv)
     }
 
     struct client_data* data = malloc(sizeof(struct client_data));
+    if (data == NULL)
+    {
+      fprintf(stderr, "Failed to allocate memory\n");
+      close(clientfd);
+      continue;
+    }
     data->fd = clientfd;
 
+    // Spawn new thread for each request
     pthread_t thread;
     if ((pthread_create(&thread, NULL, handle_client, (void*)data)) != 0)
     {
-      fprintf(stderr, "Failure to spawn thread.\n");
+      fprintf(stderr, "Failed to spawn thread.\n");
       close(clientfd);
       free(data);
       continue;
@@ -117,55 +115,133 @@ void* handle_client(void* arg)
 {
   struct client_data* data = (struct client_data*)arg;
   int fd = data->fd;
-  char buf[BUF_SIZE];
-  int flags = 0;
-  int bytes_read = recv(fd, &buf, BUF_SIZE, flags);
-  if (bytes_read == 0)
+
+  // Receive request
+  char req[BUFFER_SIZE];
+  int bytes_read = recv(fd, &req, BUFFER_SIZE - 1, 0);
+  if (bytes_read < 1)
   {
-    // Client closed connection
+    free(data);
     close(fd);
     return NULL;
   }
-  buf[bytes_read] = '\0';
+  req[bytes_read] = '\0';
+
+  // Parse path
   char route[MAX_PATH_LEN];
-  if ((parse_header(buf, route)) != 0)
+  if ((parse_header(req, route)) != 0)
   {
     fprintf(stderr, "Error in parsing header.\n");
+    free(data);
+    close(fd);
     return NULL;
   }
 
-  printf("route: %s\n", route);
-
-  int bytes_sent;
   if (strcmp(route, "/") == 0)
   {
-    // send html data
-    int fd;
-    if ((fd = open("www/index.html", O_RDONLY)) == -1)
+    // Open HTML file and get size
+    FILE* f = fopen("www/index.html", "rb");
+    if (f == NULL)
     {
-      fprintf(stderr, "Could not read html file.\n");
+      fprintf(stderr, "Could not open index.html.\n");
+      free(data);
+      close(fd);
       return NULL;
     }
-    char html_data[BUF_SIZE];
-    int b_read = read(fd, html_data, BUF_SIZE);
-    bytes_sent = send(fd, &html_data, bytes_read, flags);
-    close(fd);
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    // Format response header
+    char response_header[BUFFER_SIZE];
+    snprintf(response_header, BUFFER_SIZE,
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: text/html; charset=UTF-8\r\n"
+             "Content-Length: %ld\r\n"
+             "\r\n",
+             fsize);
+    response_header[BUFFER_SIZE - 1] = '\0';
+
+    int bytes_sent;
+    if ((bytes_sent = send_response(fd, response_header, f)) == -1)
+    {
+      fprintf(stderr, "Failed to send response.\n");
+      free(data);
+      close(fd);
+      fclose(f);
+      return NULL;
+    }
+
+    if (bytes_sent < strlen(response_header) + fsize)
+      fprintf(stderr, "Failed to send all data.\n");
+
+    printf("Served: %s (%d bytes)\n", route, bytes_sent);
+
+    fclose(f);
   }
   else if (strcmp(route, "/image") == 0)
   {
-    // send img data
+    // Open image file and get size
+    FILE* f = fopen("www/blah.jpeg", "rb");
+    if (f == NULL)
+    {
+      fprintf(stderr, "Could not open blah.jpeg.\n");
+      free(data);
+      close(fd);
+      return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    // Format response header
+    char response_header[BUFFER_SIZE];
+    snprintf(response_header, BUFFER_SIZE,
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: image/jpeg\r\n"
+             "Content-Length: %ld\r\n"
+             "\r\n",
+             fsize);
+    response_header[BUFFER_SIZE - 1] = '\0';
+
+    int bytes_sent;
+    if ((bytes_sent = send_response(fd, response_header, f)) == -1)
+    {
+      fprintf(stderr, "Failed to send response.\n");
+      free(data);
+      close(fd);
+      fclose(f);
+      return NULL;
+    }
+
+    if (bytes_sent != strlen(response_header) + fsize)
+      fprintf(stderr, "Failed to send all data.\n");
+
+    printf("Served: %s (%d bytes)\n", route, bytes_sent);
+
+    fclose(f);
   }
   else
   {
     // 404 message
+    char response_header[BUFFER_SIZE];
+    snprintf(response_header, BUFFER_SIZE,
+             "HTTP/1.1 404 Not Found\r\n"
+             "Content-Type: text/html; charset=UTF-8\r\n"
+             "Content-Length: 0\r\n"
+             "\r\n");
+    response_header[BUFFER_SIZE - 1] = '\0';
+
+    if (send(fd, response_header, strlen(response_header), 0) == -1)
+    {
+      fprintf(stderr, "Failed to send response header.\n");
+      free(data);
+      close(fd);
+      return NULL;
+    }
+
+    printf("404 Not Found: %s\n", route);
   }
-
-  if (bytes_sent != bytes_read)
-    fprintf(stderr, "Could not send all data!\n");
-  if (bytes_sent == 0)
-    fprintf(stderr, "Failure to send.\n");
-
-  printf("Data sent.\n");
 
   close(fd);
   free(data);
@@ -174,16 +250,42 @@ void* handle_client(void* arg)
 
 int parse_header(const char* header, char* route)
 {
-  printf("Header:\n %s", header);
-  int s, e;
-  for (s = 0; header[s] != ' '; s++)
-    ;
-  if (header[++s] != '/')
+  char method[4], protocol[9];
+  sscanf(header, "%3s %255s %8s", method, route, protocol);
+  method[3] = '\0';
+  route[MAX_PATH_LEN - 1] = '\0';
+  protocol[8] = '\0';
+
+  if (strcmp(method, "GET") != 0)
     return -1;
-  for (e = s; header[e] != ' '; e++)
-    ;
-  int len = e - s;
-  memcpy(route, &header[s], len);
-  route[len] = '\0';
+  if (strcmp(protocol, "HTTP/1.1") != 0)
+    return -1;
+  if (route[0] != '/')
+    return -1;
+
   return 0;
+}
+
+int send_response(int fd, char* response_header, FILE* body)
+{
+  int bytes_sent;
+  int header_size = strlen(response_header);
+  if ((bytes_sent = send(fd, response_header, header_size, 0)) == -1)
+    return -1;
+
+  char buf[BUFFER_SIZE];
+  int n;
+  while ((n = fread(buf, 1, BUFFER_SIZE, body)) > 0)
+  {
+    int total_sent = 0;
+    while (total_sent < n)
+    {
+      int sent = send(fd, buf + total_sent, n - total_sent, 0);
+      if (sent == -1)
+        return -1;
+      total_sent += sent;
+    }
+    bytes_sent += total_sent;
+  }
+  return bytes_sent;
 }
