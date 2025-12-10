@@ -7,7 +7,7 @@ A simple multithreaded HTTP server built in C using POSIX sockets and pthreads.
 * **Socket Programming:** Implements TCP/IP communication using Berkeley sockets (POSIX).
 * **Multithreading:** Implements concurrent request handling using the pthreads library.
 * **Thread Pool:** Uses a custom thread pool with a concurrent queue for efficient thread management.
-* **HTTP/1.x Support:** Handles GET requests with proper HTTP response headers.
+* **HTTP Support:** Handles GET requests with proper HTTP response headers.
 * **Static File Serving:** Serves static HTML and JPEG content.
 
 ## Example
@@ -30,7 +30,6 @@ The server listens on port 8000 and serves:
 
 ```bash
 make
-```
 ```
 
 ### Running the Server
