@@ -29,17 +29,14 @@ The server listens on port 8000 and serves:
 ### Compilation
 
 ```bash
-```bash
 make
 ```
 ```
 
 ### Running the Server
-
 ```bash
 ./server
 ```
-
 The server will start listening on port `8000` on all interfaces.
 You should probably not run this on a public WiFi network...
 

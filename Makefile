@@ -1,6 +1,6 @@
 
 all: server.c
-	clang server.c -o server
+	clang -pthread server.c -o server
 
 clean:
 	rm -f server
