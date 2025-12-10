@@ -22,8 +22,11 @@ void* handle_client(void* arg);
 int parse_header(const char* header, char* route);
 int send_response(int fd, char* response_header, FILE* body);
 
+static pthread_mutex_t print_lock;
+
 int main(int argc, char** argv)
 {
+  pthread_mutex_init(&print_lock, NULL);
   // Collect address info for creating a IPv4/IPv6 TCP socket
   // for listening on PORT on all interfaces (0.0.0.0:PORT)
   struct addrinfo hints;
@@ -108,6 +111,7 @@ int main(int argc, char** argv)
     }
     pthread_detach(thread);
   }
+  pthread_mutex_destroy(&print_lock);
   close(socketfd);
 }
 
@@ -131,7 +135,7 @@ void* handle_client(void* arg)
   char route[MAX_PATH_LEN];
   if ((parse_header(req, route)) != 0)
   {
-    fprintf(stderr, "Error in parsing header.\n");
+    fprintf(stderr, "Error in parsing header: %s\n", req);
     free(data);
     close(fd);
     return NULL;
@@ -148,9 +152,19 @@ void* handle_client(void* arg)
       close(fd);
       return NULL;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    long fsize;
+    if (fseek(f, 0, SEEK_END) != 0 || (fsize = ftell(f)) == -1 ||
+        fseek(f, 0, SEEK_SET) != 0)
+    {
+      fprintf(stderr, "Failed to get file size.\n");
+      free(data);
+      close(fd);
+      fclose(f);
+      return NULL;
+    }
+
+    // Simulate I/0 operation (for testing multi-threaded performance)
+    usleep(100000);
 
     // Format response header
     char response_header[BUFFER_SIZE];
@@ -175,7 +189,9 @@ void* handle_client(void* arg)
     if (bytes_sent < strlen(response_header) + fsize)
       fprintf(stderr, "Failed to send all data.\n");
 
+    pthread_mutex_lock(&print_lock);
     printf("Served: %s (%d bytes)\n", route, bytes_sent);
+    pthread_mutex_unlock(&print_lock);
 
     fclose(f);
   }
@@ -190,9 +206,16 @@ void* handle_client(void* arg)
       close(fd);
       return NULL;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    long fsize;
+    if (fseek(f, 0, SEEK_END) != 0 || (fsize = ftell(f)) == -1 ||
+        fseek(f, 0, SEEK_SET) != 0)
+    {
+      fprintf(stderr, "Failed to get file size.\n");
+      free(data);
+      close(fd);
+      fclose(f);
+      return NULL;
+    }
 
     // Format response header
     char response_header[BUFFER_SIZE];
@@ -217,7 +240,9 @@ void* handle_client(void* arg)
     if (bytes_sent != strlen(response_header) + fsize)
       fprintf(stderr, "Failed to send all data.\n");
 
+    pthread_mutex_lock(&print_lock);
     printf("Served: %s (%d bytes)\n", route, bytes_sent);
+    pthread_mutex_unlock(&print_lock);
 
     fclose(f);
   }
@@ -240,7 +265,9 @@ void* handle_client(void* arg)
       return NULL;
     }
 
+    pthread_mutex_lock(&print_lock);
     printf("404 Not Found: %s\n", route);
+    pthread_mutex_unlock(&print_lock);
   }
 
   close(fd);
@@ -250,15 +277,15 @@ void* handle_client(void* arg)
 
 int parse_header(const char* header, char* route)
 {
-  char method[4], protocol[9];
-  sscanf(header, "%3s %255s %8s", method, route, protocol);
+  char method[4], protocol[5];
+  sscanf(header, "%3s %255s %4s", method, route, protocol);
   method[3] = '\0';
   route[MAX_PATH_LEN - 1] = '\0';
-  protocol[8] = '\0';
+  protocol[4] = '\0';
 
   if (strcmp(method, "GET") != 0)
     return -1;
-  if (strcmp(protocol, "HTTP/1.1") != 0)
+  if (strcmp(protocol, "HTTP") != 0)
     return -1;
   if (route[0] != '/')
     return -1;
@@ -287,5 +314,7 @@ int send_response(int fd, char* response_header, FILE* body)
     }
     bytes_sent += total_sent;
   }
+  if (ferror(body))
+    return -1;
   return bytes_sent;
 }
