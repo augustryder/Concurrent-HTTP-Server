@@ -14,9 +14,9 @@
 #define BUFFER_SIZE 4096
 #define MAX_PATH_LEN 256
 
-#define THREADPOOL 1
+#define THREADPOOL 0
 #define NO_CONCURRENCY 0
-#define THREAD_PER_REQUEST 0
+#define THREAD_PER_REQUEST 1
 
 struct client_data
 {
