@@ -1,3 +1,4 @@
+#include "threadpool.h"
 #include <fcntl.h>
 #include <memory.h>
 #include <netdb.h>
@@ -13,12 +14,21 @@
 #define BUFFER_SIZE 4096
 #define MAX_PATH_LEN 256
 
+#define THREADPOOL 1
+#define NO_CONCURRENCY 0
+#define THREAD_PER_REQUEST 0
+
 struct client_data
 {
   int fd;
 };
 
+#if THREAD_PER_REQUEST
 void* handle_client(void* arg);
+#endif
+#if THREADPOOL || NO_CONCURRENCY
+void* handle_client(int fd);
+#endif
 int parse_header(const char* header, char* route);
 int send_response(int fd, char* response_header, FILE* body);
 
@@ -79,6 +89,11 @@ int main(int argc, char** argv)
 
   printf("Server listening on %s...\n", PORT);
 
+#if THREADPOOL
+  threadpool_t threadpool;
+  threadpool_init(&threadpool, handle_client);
+#endif
+
   // Handle requests indefinitely
   while (1)
   {
@@ -91,6 +106,11 @@ int main(int argc, char** argv)
       continue;
     }
 
+#if THREADPOOL
+    threadpool_enqueue_request(&threadpool, clientfd);
+#endif
+
+#if THREAD_PER_REQUEST
     struct client_data* data = malloc(sizeof(struct client_data));
     if (data == NULL)
     {
@@ -110,22 +130,33 @@ int main(int argc, char** argv)
       continue;
     }
     pthread_detach(thread);
+#endif
+
+#if NO_CONCURRENCY
+    handle_client(clientfd);
+#endif
   }
   pthread_mutex_destroy(&print_lock);
   close(socketfd);
 }
 
+#if THREAD_PER_REQUEST
 void* handle_client(void* arg)
+#endif
+#if THREADPOOL || NO_CONCURRENCY
+    void* handle_client(int fd)
+#endif
 {
+#if THREAD_PER_REQUEST
   struct client_data* data = (struct client_data*)arg;
   int fd = data->fd;
-
+#endif
   // Receive request
   char req[BUFFER_SIZE];
   int bytes_read = recv(fd, &req, BUFFER_SIZE - 1, 0);
   if (bytes_read < 1)
   {
-    free(data);
+    // free(data);
     close(fd);
     return NULL;
   }
@@ -136,7 +167,7 @@ void* handle_client(void* arg)
   if ((parse_header(req, route)) != 0)
   {
     fprintf(stderr, "Error in parsing header: %s\n", req);
-    free(data);
+    // free(data);
     close(fd);
     return NULL;
   }
@@ -148,7 +179,7 @@ void* handle_client(void* arg)
     if (f == NULL)
     {
       fprintf(stderr, "Could not open index.html.\n");
-      free(data);
+      // free(data);
       close(fd);
       return NULL;
     }
@@ -157,7 +188,7 @@ void* handle_client(void* arg)
         fseek(f, 0, SEEK_SET) != 0)
     {
       fprintf(stderr, "Failed to get file size.\n");
-      free(data);
+      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -180,7 +211,7 @@ void* handle_client(void* arg)
     if ((bytes_sent = send_response(fd, response_header, f)) == -1)
     {
       fprintf(stderr, "Failed to send response.\n");
-      free(data);
+      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -202,7 +233,7 @@ void* handle_client(void* arg)
     if (f == NULL)
     {
       fprintf(stderr, "Could not open blah.jpeg.\n");
-      free(data);
+      // free(data);
       close(fd);
       return NULL;
     }
@@ -211,7 +242,7 @@ void* handle_client(void* arg)
         fseek(f, 0, SEEK_SET) != 0)
     {
       fprintf(stderr, "Failed to get file size.\n");
-      free(data);
+      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -231,7 +262,7 @@ void* handle_client(void* arg)
     if ((bytes_sent = send_response(fd, response_header, f)) == -1)
     {
       fprintf(stderr, "Failed to send response.\n");
-      free(data);
+      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -260,7 +291,7 @@ void* handle_client(void* arg)
     if (send(fd, response_header, strlen(response_header), 0) == -1)
     {
       fprintf(stderr, "Failed to send response header.\n");
-      free(data);
+      // free(data);
       close(fd);
       return NULL;
     }
@@ -271,7 +302,7 @@ void* handle_client(void* arg)
   }
 
   close(fd);
-  free(data);
+  // free(data);
   return NULL;
 }
 
