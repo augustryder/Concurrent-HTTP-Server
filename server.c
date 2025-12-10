@@ -14,21 +14,12 @@
 #define BUFFER_SIZE 4096
 #define MAX_PATH_LEN 256
 
-#define THREADPOOL 1
-#define NO_CONCURRENCY 0
-#define THREAD_PER_REQUEST 0
-
 struct client_data
 {
   int fd;
 };
 
-#if THREAD_PER_REQUEST
-void* handle_client(void* arg);
-#endif
-#if THREADPOOL || NO_CONCURRENCY
 void* handle_client(int fd);
-#endif
 int parse_header(const char* header, char* route);
 int send_response(int fd, char* response_header, FILE* body);
 
@@ -89,10 +80,9 @@ int main(int argc, char** argv)
 
   printf("Server listening on %s...\n", PORT);
 
-#if THREADPOOL
+  // Initialize threadpool
   threadpool_t threadpool;
   threadpool_init(&threadpool, handle_client);
-#endif
 
   // Handle requests indefinitely
   while (1)
@@ -105,52 +95,15 @@ int main(int argc, char** argv)
       fprintf(stderr, "Failure to accept client.\n");
       continue;
     }
-
-#if THREADPOOL
     threadpool_enqueue_request(&threadpool, clientfd);
-#endif
-
-#if THREAD_PER_REQUEST
-    struct client_data* data = malloc(sizeof(struct client_data));
-    if (data == NULL)
-    {
-      fprintf(stderr, "Failed to allocate memory\n");
-      close(clientfd);
-      continue;
-    }
-    data->fd = clientfd;
-
-    // Spawn new thread for each request
-    pthread_t thread;
-    if ((pthread_create(&thread, NULL, handle_client, (void*)data)) != 0)
-    {
-      fprintf(stderr, "Failed to spawn thread.\n");
-      close(clientfd);
-      free(data);
-      continue;
-    }
-    pthread_detach(thread);
-#endif
-
-#if NO_CONCURRENCY
-    handle_client(clientfd);
-#endif
   }
+  threadpool_shutdown(&threadpool);
   pthread_mutex_destroy(&print_lock);
   close(socketfd);
 }
 
-#if THREAD_PER_REQUEST
-void* handle_client(void* arg)
-#endif
-#if THREADPOOL || NO_CONCURRENCY
-    void* handle_client(int fd)
-#endif
+void* handle_client(int fd)
 {
-#if THREAD_PER_REQUEST
-  struct client_data* data = (struct client_data*)arg;
-  int fd = data->fd;
-#endif
   // Receive request
   char req[BUFFER_SIZE];
   int bytes_read = recv(fd, &req, BUFFER_SIZE - 1, 0);
