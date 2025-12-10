@@ -109,7 +109,6 @@ void* handle_client(int fd)
   int bytes_read = recv(fd, &req, BUFFER_SIZE - 1, 0);
   if (bytes_read < 1)
   {
-    // free(data);
     close(fd);
     return NULL;
   }
@@ -120,7 +119,6 @@ void* handle_client(int fd)
   if ((parse_header(req, route)) != 0)
   {
     fprintf(stderr, "Error in parsing header: %s\n", req);
-    // free(data);
     close(fd);
     return NULL;
   }
@@ -132,7 +130,6 @@ void* handle_client(int fd)
     if (f == NULL)
     {
       fprintf(stderr, "Could not open index.html.\n");
-      // free(data);
       close(fd);
       return NULL;
     }
@@ -141,14 +138,10 @@ void* handle_client(int fd)
         fseek(f, 0, SEEK_SET) != 0)
     {
       fprintf(stderr, "Failed to get file size.\n");
-      // free(data);
       close(fd);
       fclose(f);
       return NULL;
     }
-
-    // Simulate I/0 operation (for testing multi-threaded performance)
-    usleep(100000);
 
     // Format response header
     char response_header[BUFFER_SIZE];
@@ -164,7 +157,6 @@ void* handle_client(int fd)
     if ((bytes_sent = send_response(fd, response_header, f)) == -1)
     {
       fprintf(stderr, "Failed to send response.\n");
-      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -186,7 +178,6 @@ void* handle_client(int fd)
     if (f == NULL)
     {
       fprintf(stderr, "Could not open blah.jpeg.\n");
-      // free(data);
       close(fd);
       return NULL;
     }
@@ -195,7 +186,6 @@ void* handle_client(int fd)
         fseek(f, 0, SEEK_SET) != 0)
     {
       fprintf(stderr, "Failed to get file size.\n");
-      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -215,7 +205,6 @@ void* handle_client(int fd)
     if ((bytes_sent = send_response(fd, response_header, f)) == -1)
     {
       fprintf(stderr, "Failed to send response.\n");
-      // free(data);
       close(fd);
       fclose(f);
       return NULL;
@@ -244,7 +233,6 @@ void* handle_client(int fd)
     if (send(fd, response_header, strlen(response_header), 0) == -1)
     {
       fprintf(stderr, "Failed to send response header.\n");
-      // free(data);
       close(fd);
       return NULL;
     }
@@ -255,7 +243,6 @@ void* handle_client(int fd)
   }
 
   close(fd);
-  // free(data);
   return NULL;
 }
 
